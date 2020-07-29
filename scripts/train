@@ -2,3 +2,14 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 main_oxuva.py  --datapath /mnt/ssd/oxuva/al
 x CUDA_VISIBLE_DEVICES=1 python3 main_oxuva.py  --validpath /scratch/local/ssd/zlai/DAVIS-2017 --bsize 18 --savepath results/071601 --gumbel
 CUDA_VISIBLE_DEVICES=0,2,3 python3 main_oxuva.py  --validpath /scratch/local/ssd/zlai/DAVIS-2017 --bsize 18 --savepath results/071602 --gumbel --resume results/071101/checkpoint.tar
 CUDA_VISIBLE_DEVICES=0,1 python3 main_oxuva.py  --datapath /scratch/local/ssd/zlai/all/ --validpath /scratch/local/ssd/zlai/DAVIS-2017 --bsize 18 --savepath /scratch/local/ssd/zlai/results/080201 --photo
+
+
+python main.py --datapath ~/DataSets/YouTube_VOS/train_all_frames/JPEGImages/ --savepath checkpoint/debug --mode slower
+
+python benchmark.py --resume ~/LOG/MAST/results/official/released_checkpoint.pt \
+                    --datapath ~/DataSets/DAVIS/davis/DAVIS/ \
+                    --savepath ~/LOG/MAST/results/official --ref 0
+
+cd ../davis2017-evaluation/
+conda activate DAVIS
+python evaluation_method.py --task semi-supervised --results_path  ~/LOG/MAST/results/official/benchmark

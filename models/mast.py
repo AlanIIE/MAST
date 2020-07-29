@@ -26,7 +26,7 @@ class MAST(nn.Module):
         else:
             self.R = 12
 
-        self.colorizer = Colorizer(self.D, self.R, self.C)
+        self.colorizer = Colorizer(self.D, self.R, self.C, args.mode)
 
     def forward(self, rgb_r, quantized_r, rgb_t, ref_index=None,current_ind=None):
         feats_r = [self.post_convolution(self.feature_extraction(rgb)) for rgb in rgb_r]

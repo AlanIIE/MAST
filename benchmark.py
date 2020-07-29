@@ -37,9 +37,18 @@ def main():
     log.info('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
     if args.resume:
+        if os.path.isdir(args.resume):
+            checkpoint_path = args.resume
+            num_file_last = -1
+            for file in os.listdir(checkpoint_path):
+                if not file[-2:] == 'pt': continue
+                num_file = int(file[:-3].split('_')[2])
+                if num_file > num_file_last:
+                    args.resume = os.path.join(checkpoint_path,file)
+                    num_file_last = num_file
         if os.path.isfile(args.resume):
             log.info("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
+            checkpoint = torch.load(args.resume) # , map_location=torch.device('cpu'))
             model.load_state_dict(checkpoint['state_dict'])
             log.info("=> loaded checkpoint '{}'".format(args.resume))
         else:
@@ -67,6 +76,7 @@ def test(dataloader, model, log):
 
     log.info("Start testing.")
     for b_i, (images_rgb, annotations) in enumerate(dataloader):
+        torch.cuda.empty_cache()
         fb = AverageMeter(); jb = AverageMeter()
 
         images_rgb = [r.cuda() for r in images_rgb]
@@ -83,6 +93,10 @@ def test(dataloader, model, log):
                 ref_index = sorted(list(set(ref_index)))
             elif args.ref == 1:
                 ref_index = [0] + list(filter(lambda x: x > 0, range(i, i - mem_gap * 3, -mem_gap)))[::-1]
+                # if i>=5:
+                #     anno_0 = [outputs[0],outputs[-5],outputs[-3],outputs[-1]]
+                # else:
+                #     anno_0 = [outputs[ind] for ind in ref_index]
             elif args.ref == 2:
                 ref_index = [i]
             else:
@@ -103,6 +117,8 @@ def test(dataloader, model, log):
                 _output = F.interpolate(_output, (h,w), mode='bilinear')
 
                 output = torch.argmax(_output, 1, keepdim=True).float()
+                # if i >=5:
+                #     outputs.pop(1)
                 outputs.append(output)
 
             js, fs = [], []
@@ -172,6 +188,8 @@ if __name__ == '__main__':
 
     # Data options
     parser.add_argument('--ref', type=int, default=0)
+    parser.add_argument('--mode', type=str, default='faster',
+                        help='faster for cuda tensor multiply, slower for frame by frame, cpu for cpu tensor multiply')
 
     parser.add_argument('--datapath', help='Data path for Davis')
     parser.add_argument('--savepath', type=str, default='results/test',

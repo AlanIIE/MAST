@@ -21,13 +21,13 @@ from models.mast import MAST
 parser = argparse.ArgumentParser(description='MAST')
 
 # Data options
-parser.add_argument('--datapath', default='/scratch/local/ramdisk/zlai/oxuva/all/',
+parser.add_argument('--datapath', default='/home/kuang/DataSets/YouTube_VOS/train_all_frames/JPEGImages/',
                     help='Data path for Kinetics')
 parser.add_argument('--validpath',
                     help='Data path for Davis')
 parser.add_argument('--csvpath', default='functional/feeder/dataset/ytvos.csv',
                     help='Path for csv file')
-parser.add_argument('--savepath', type=str, default='results/test',
+parser.add_argument('--savepath', type=str, default='results/debug',
                     help='Path for checkpoints and logs')
 parser.add_argument('--resume', type=str, default=None,
                     help='Checkpoint file to resume')
@@ -41,6 +41,8 @@ parser.add_argument('--bsize', type=int, default=12,
                     help='batch size for training (default: 12)')
 parser.add_argument('--worker', type=int, default=12,
                     help='number of dataloader threads')
+parser.add_argument('--mode', type=str, default='faster',
+                    help='faster for cuda tensor multiply, slower for frame by frame, cpu for cpu tensor multiply')
 
 args = parser.parse_args()
 

@@ -7,7 +7,7 @@ from .deform_im2col_util import deform_im2col
 import pdb
 
 class Colorizer(nn.Module):
-    def __init__(self, D=4, R=6, C=32):
+    def __init__(self, D=4, R=6, C=32, mode='faster'):
         super(Colorizer, self).__init__()
         self.D = D
         self.R = R  # window size
@@ -17,6 +17,7 @@ class Colorizer(nn.Module):
         self.N = self.P * self.P
         self.count = 0
 
+        self.mode = mode
         self.memory_patch_R = 12
         self.memory_patch_P = self.memory_patch_R * 2 + 1
         self.memory_patch_N = self.memory_patch_P * self.memory_patch_P
@@ -46,6 +47,28 @@ class Colorizer(nn.Module):
             x = one_hot(x.long(), self.C)
 
         return x
+    
+    def calculate_corr(self, feats_t, feats_r, searching_index, offset0):
+        b,c,h,w = feats_t.size()
+        N = self.P * self.P
+        if self.mode == 'cpu':
+            col_0 = deform_im2col(feats_r[searching_index].cpu(), offset0.cpu(), kernel_size=self.P, mode = 'faster')  # b,c*N,h*w
+            col_0 = col_0.reshape(b,c,N,h,w)
+            ##
+            corr = (feats_t.cpu().unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
+            return corr.cuda()
+        else:
+            col_0 = deform_im2col(feats_r[searching_index], offset0, kernel_size=self.P, mode = self.mode)  # b,c*N,h*w
+            col_0 = col_0.reshape(b,c,N,h,w)
+            ##
+            if self.mode == 'faster':
+                corr = (feats_t.unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
+            else:
+                # col_0[:,0,] = feats_t.unsqueeze(2)[:,0,]*col_0[:,0,]
+                # col_0[:,1:,] = feats_t.unsqueeze(2)[:,1:,]*col_0[:,1:,]
+                for batch in range(c//16):
+                    col_0[:,16*batch:16*(batch+1),] = feats_t.unsqueeze(2)[:,16*batch:16*(batch+1),]*col_0[:,16*batch:16*(batch+1),]
+            return col_0.sum(1)
 
     def forward(self, feats_r, feats_t, quantized_r, ref_index, current_ind, dil_int = 15):
         """
@@ -79,10 +102,7 @@ class Colorizer(nn.Module):
                 .reshape(1,self.memory_patch_P,self.memory_patch_P,1,1,2).contiguous().float().to(coarse_search_correlation.device)
             offset0 = (coarse_search_correlation * grid ).sum(1).sum(1) * dirates[searching_index]  # 1,h,w,2
 
-            col_0 = deform_im2col(feats_r[searching_index], offset0, kernel_size=self.P)  # b,c*N,h*w
-            col_0 = col_0.reshape(b,c,N,h,w)
-            ##
-            corr = (feats_t.unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
+            corr = self.calculate_corr(feats_t, feats_r, searching_index, offset0)
 
             corr = corr.reshape([b, self.P * self.P, h * w])
             corrs.append(corr)
@@ -98,15 +118,22 @@ class Colorizer(nn.Module):
 
         qr = [self.prep(qr, (h,w)) for qr in quantized_r]
 
-        im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P)  for i in range(nsearch)]# b,3*N,h*w
+        im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P,mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
         im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
         image_uf = im_col0 + im_col1
 
         image_uf = [uf.reshape([b,qr[0].size(1),self.P*self.P,h*w]) for uf in image_uf]
         image_uf = torch.cat(image_uf, 2)
-        out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
+        if self.mode == 'cpu' or self.mode == 'faster':
+            out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
 
-        return out
+            return out
+        else:
+            # image_uf[:,0,:,:] = (corr * image_uf[:,0,:,:])
+            # image_uf[:,1:,:,:] = (corr * image_uf[:,1:,:,:])
+            for batch in range(image_uf.shape[1]):
+                image_uf[:,batch,:,:] = image_uf[:,batch,:,:]*corr
+            return image_uf.sum(2).reshape([b,qr[0].size(1),h,w])
 
 def torch_unravel_index(indices, shape):
     rows = indices / shape[0]

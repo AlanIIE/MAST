@@ -32,6 +32,7 @@ Recent interest in self-supervised dense tracking has yielded rapid progress, bu
 ## Usage
 1. Install dependencies
     ``` 
+    git clone https://github.com/zlai0/MAST.git
     pip install -r requirements.txt
    ```
    
