@@ -70,6 +70,15 @@ def main():
     log.info('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
     if args.resume:
+        if os.path.isdir(args.resume):
+            checkpoint_path = args.resume
+            num_file_last = -1
+            for file in os.listdir(checkpoint_path):
+                if not file[-2:] == 'pt': continue
+                num_file = int(file[:-3].split('_')[2])
+                if num_file > num_file_last:
+                    args.resume = os.path.join(checkpoint_path,file)
+                    num_file_last = num_file
         if os.path.isfile(args.resume):
             log.info("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
@@ -133,8 +142,9 @@ def train(dataloader, model, optimizer, log, writer, epoch):
 
         for param_group in optimizer.param_groups:
             lr_now = param_group['lr']
-        log.info('Epoch{} [{}/{}] {} T={:.2f}  LR={:.6f}'.format(
-            epoch, b_i, n_b, info, b_t, lr_now))
+        if b_i % 100 == 0:
+            log.info('Epoch{} [{}/{}] {} T={:.2f}  LR={:.6f}'.format(
+                epoch, b_i, n_b, info, b_t, lr_now))
 
 
         if (b_i * args.bsize) % 2000 < args.bsize:

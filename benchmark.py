@@ -93,10 +93,6 @@ def test(dataloader, model, log):
                 ref_index = sorted(list(set(ref_index)))
             elif args.ref == 1:
                 ref_index = [0] + list(filter(lambda x: x > 0, range(i, i - mem_gap * 3, -mem_gap)))[::-1]
-                # if i>=5:
-                #     anno_0 = [outputs[0],outputs[-5],outputs[-3],outputs[-1]]
-                # else:
-                #     anno_0 = [outputs[ind] for ind in ref_index]
             elif args.ref == 2:
                 ref_index = [i]
             else:
@@ -117,8 +113,6 @@ def test(dataloader, model, log):
                 _output = F.interpolate(_output, (h,w), mode='bilinear')
 
                 output = torch.argmax(_output, 1, keepdim=True).float()
-                # if i >=5:
-                #     outputs.pop(1)
                 outputs.append(output)
 
             js, fs = [], []

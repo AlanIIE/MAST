@@ -12,7 +12,17 @@
             "console": "integratedTerminal",
             "args": [
                 "--savepath",
-                "../../LOG/MASTresults/debug"
+                "../../LOG/MAST/results/debug",
+                "--resume",
+                "../../LOG/MAST/results/debug",
+                "--epoch",
+                "21",
+                "--mode",
+                "slower",
+                "--bsize",
+                "32",
+                "--worker",
+                "32"
             ]
         }
         {

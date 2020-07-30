@@ -4,7 +4,7 @@ CUDA_VISIBLE_DEVICES=0,2,3 python3 main_oxuva.py  --validpath /scratch/local/ssd
 CUDA_VISIBLE_DEVICES=0,1 python3 main_oxuva.py  --datapath /scratch/local/ssd/zlai/all/ --validpath /scratch/local/ssd/zlai/DAVIS-2017 --bsize 18 --savepath /scratch/local/ssd/zlai/results/080201 --photo
 
 
-python main.py --datapath ~/DataSets/YouTube_VOS/train_all_frames/JPEGImages/ --savepath checkpoint/debug --mode slower
+python main.py --savepath ~/LOG/MAST/results/debug --mode slower --resume ~/LOG/MAST/results/debug --epoch 21 --bsize 32
 
 python benchmark.py --resume ~/LOG/MAST/results/official/released_checkpoint.pt \
                     --datapath ~/DataSets/DAVIS/davis/DAVIS/ \

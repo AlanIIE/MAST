@@ -7,7 +7,7 @@ from .deform_im2col_util import deform_im2col
 import pdb
 
 class Colorizer(nn.Module):
-    def __init__(self, D=4, R=6, C=32, mode='faster'):
+    def __init__(self, D=4, R=6, C=32, mode='faster', training=False):
         super(Colorizer, self).__init__()
         self.D = D
         self.R = R  # window size
@@ -17,6 +17,7 @@ class Colorizer(nn.Module):
         self.N = self.P * self.P
         self.count = 0
 
+        self.training = training
         self.mode = mode
         self.memory_patch_R = 12
         self.memory_patch_P = self.memory_patch_R * 2 + 1
@@ -62,7 +63,7 @@ class Colorizer(nn.Module):
             col_0 = col_0.reshape(b,c,N,h,w)
             ##
             if self.mode == 'faster':
-                corr = (feats_t.unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
+                return (feats_t.unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
             else:
                 # col_0[:,0,] = feats_t.unsqueeze(2)[:,0,]*col_0[:,0,]
                 # col_0[:,1:,] = feats_t.unsqueeze(2)[:,1:,]*col_0[:,1:,]
@@ -124,15 +125,19 @@ class Colorizer(nn.Module):
 
         image_uf = [uf.reshape([b,qr[0].size(1),self.P*self.P,h*w]) for uf in image_uf]
         image_uf = torch.cat(image_uf, 2)
-        if self.mode == 'cpu' or self.mode == 'faster':
+        if self.training or self.mode == 'cpu' or self.mode == 'faster':
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
 
             return out
         else:
             # image_uf[:,0,:,:] = (corr * image_uf[:,0,:,:])
             # image_uf[:,1:,:,:] = (corr * image_uf[:,1:,:,:])
-            for batch in range(image_uf.shape[1]):
-                image_uf[:,batch,:,:] = image_uf[:,batch,:,:]*corr
+            if corr.shape[1] == 1:
+                for batch in range(image_uf.shape[1]):
+                    image_uf[:,batch,:,:] = image_uf[:,batch,:,:]*corr
+            else:
+                for batch in range(image_uf.shape[1]):
+                    image_uf[:,batch,:,:] = image_uf[:,batch,:,:]*corr[:,batch,:,:]
             return image_uf.sum(2).reshape([b,qr[0].size(1),h,w])
 
 def torch_unravel_index(indices, shape):
