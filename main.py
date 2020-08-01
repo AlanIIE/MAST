@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+from datetime import datetime
 import pdb
 
 import numpy as np
@@ -44,6 +45,18 @@ parser.add_argument('--worker', type=int, default=12,
 parser.add_argument('--mode', type=str, default='faster',
                     help='faster for cuda tensor multiply, slower for frame by frame, cpu for cpu tensor multiply')
 
+# Debug options
+parser.add_argument('--multi_scale', type=str, default=None,
+                    help='None for origin setting;\n \
+                        (a) for residual 1\&5 plus;\n \
+                        (b) for residual 1\&5 cat;\n')
+parser.add_argument('--num_long', type=int, default=1,
+                    help='Long term memory')
+parser.add_argument('--dil_int', type=int, default=15,
+                    help='For frame interval < dil_int, no need for deformable resampling, default 15.')
+parser.add_argument('--num_short', dest='ref_num', type=int, default=3,
+                    help='Short term memory.')
+
 args = parser.parse_args()
 
 def main():
@@ -51,15 +64,18 @@ def main():
 
     if not os.path.isdir(args.savepath):
         os.makedirs(args.savepath)
-    log = logger.setup_logger(args.savepath + '/training.log')
-    writer = SummaryWriter(args.savepath + '/runs/')
+        
+    TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S}".format(datetime.now())
+    log = logger.setup_logger(args.savepath + '/training'+TIMESTAMP+'.log')
+    writer = SummaryWriter(args.savepath + '/runs_'+TIMESTAMP)
 
     for key, value in sorted(vars(args).items()):
         log.info(str(key) + ': ' + str(value))
 
-    TrainData = Y.dataloader(args.csvpath)
+    dirates = 1#np.random.choice([1,2,3,4])
+    TrainData, frame_indices = Y.dataloader(args.csvpath, args.num_long, args.ref_num, args.dil_int, dirates)
     TrainImgLoader = torch.utils.data.DataLoader(
-        YL.myImageFloder(args.datapath, TrainData, True),
+        YL.myImageFloder(args.datapath, TrainData, frame_indices, True),
         batch_size=args.bsize, shuffle=True, num_workers=args.worker,drop_last=True
     )
 
@@ -69,6 +85,7 @@ def main():
 
     log.info('Number of model parameters: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
 
+    epoch_start = -1
     if args.resume:
         if os.path.isdir(args.resume):
             checkpoint_path = args.resume
@@ -85,6 +102,7 @@ def main():
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             log.info("=> loaded checkpoint '{}'".format(args.resume))
+            epoch_start = checkpoint['epoch']
         else:
             log.info("=> No checkpoint found at '{}'".format(args.resume))
             log.info("=> Will start from scratch.")
@@ -94,26 +112,28 @@ def main():
     start_full_time = time.time()
     model = nn.DataParallel(model).cuda()
 
-    for epoch in range(args.epochs):
+    for epoch in range(epoch_start+1, args.epochs):
         log.info('This is {}-th epoch'.format(epoch))
-        train(TrainImgLoader, model, optimizer, log, writer, epoch)
+        train(TrainImgLoader, model, optimizer, log, writer, epoch, [dirates for i in range(args.num_long)])
 
-        TrainData = Y.dataloader(args.csvpath, epoch)
+        dirates = np.random.choice([1,2,3,4])
+        TrainData, frame_indices = Y.dataloader(args.csvpath, args.num_long, args.ref_num, args.dil_int, dirates)
         TrainImgLoader = torch.utils.data.DataLoader(
-            YL.myImageFloder(args.datapath, TrainData, True),
+            YL.myImageFloder(args.datapath, TrainData, frame_indices, True),
             batch_size=args.bsize, shuffle=True, num_workers=args.worker, drop_last=True
         )
 
     log.info('full training time = {:.2f} Hours'.format((time.time() - start_full_time) / 3600))
 
 iteration = 0
-def train(dataloader, model, optimizer, log, writer, epoch):
+def train(dataloader, model, optimizer, log, writer, epoch, dirates):
     global iteration
     _loss = AverageMeter()
     n_b = len(dataloader)
     b_s = time.perf_counter()
 
-    for b_i, (images_lab, images_rgb_, images_quantized) in enumerate(dataloader):
+    for b_i, (images_lab, images_rgb_, images_quantized, ref_index) in enumerate(dataloader):
+        # if epoch == 0: continue
         model.train()
 
         adjust_lr(optimizer, epoch, b_i, n_b)
@@ -123,8 +143,7 @@ def train(dataloader, model, optimizer, log, writer, epoch):
         images_rgb_ = [r.cuda() for r in images_rgb_]
 
         _, ch = model.module.dropout2d_lab(images_lab)
-
-        sum_loss, err_maps = compute_lphoto(model, images_lab, images_lab_gt, ch)
+        sum_loss, err_maps = compute_lphoto(model, images_lab, images_lab_gt, ch, ref_index, dirates)
 
         sum_loss.backward()
 
@@ -142,9 +161,9 @@ def train(dataloader, model, optimizer, log, writer, epoch):
 
         for param_group in optimizer.param_groups:
             lr_now = param_group['lr']
-        if b_i % 100 == 0:
-            log.info('Epoch{} [{}/{}] {} T={:.2f}  LR={:.6f}'.format(
-                epoch, b_i, n_b, info, b_t, lr_now))
+        # if b_i % 1 == 0:
+        log.info('Epoch{} [{}/{}] {} T={:.2f}  LR={:.6f}'.format(
+            epoch, b_i, n_b, info, b_t, lr_now))
 
 
         if (b_i * args.bsize) % 2000 < args.bsize:
@@ -184,16 +203,18 @@ def train(dataloader, model, optimizer, log, writer, epoch):
         'optimizer': optimizer.state_dict(),
     }, savefilename)
 
-def compute_lphoto(model, image_lab, images_rgb_, ch):
+def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     b, c, h, w = image_lab[0].size()
 
     ref_x = [lab for lab in image_lab[:-1]]   # [im1, im2, im3]
     ref_y = [rgb[:,ch] for rgb in images_rgb_[:-1]]  # [y1, y2, y3]
     tar_x = image_lab[-1]  # im4
     tar_y = images_rgb_[-1][:,ch]  # y4
+    ref_index = [index[:,ind] for ind in range(index.shape[1]-1)] #list(5),each with 12 elements
+    tar_index = index[:,-1]
 
-
-    outputs = model(ref_x, ref_y, tar_x, [0,2], 4)   # only train with pairwise data
+ ##### 这里的batchsize要和worker对应上，现在要给ref里面有多个数据
+    outputs = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
 
     outputs = F.interpolate(outputs, (h, w), mode='bilinear')
     loss = F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean')

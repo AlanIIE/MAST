@@ -30,20 +30,23 @@ def lab_preprocess(image):
     return image
 
 class myImageFloder(data.Dataset):
-    def __init__(self, filepath, filenames, training):
+    def __init__(self, filepath, filenames, frame_indices, training):
 
         self.refs = filenames
         self.filepath = filepath
+        self.frame_indices = frame_indices
 
     def __getitem__(self, index):
         refs = self.refs[index]
 
         images = [image_loader(os.path.join(self.filepath, ref)) for ref in refs]
-
-        images_lab = [lab_preprocess(ref) for ref in images]
+        try:
+            images_lab = [lab_preprocess(ref) for ref in images]
+        except:
+            print(refs)
         images_rgb = [rgb_preprocess(ref) for ref in images]
 
-        return images_lab, images_rgb, 1
+        return images_lab, images_rgb, 1, self.frame_indices[index]
 
     def __len__(self):
         return len(self.refs)

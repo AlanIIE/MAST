@@ -76,7 +76,7 @@ def test(dataloader, model, log):
 
     log.info("Start testing.")
     for b_i, (images_rgb, annotations) in enumerate(dataloader):
-        torch.cuda.empty_cache()
+        # if b_i<=27: continue
         fb = AverageMeter(); jb = AverageMeter()
 
         images_rgb = [r.cuda() for r in images_rgb]
@@ -110,6 +110,10 @@ def test(dataloader, model, log):
 
             with torch.no_grad():
                 _output = model(rgb_0, anno_0, rgb_1, ref_index, i+1)
+                # rgb_0:    list(5),[1,3,480,910]
+                # anno_0:   list(5),[1,1,480,910]
+                # rgb_1:    tensor, [1,3,480,910]
+                # 
                 _output = F.interpolate(_output, (h,w), mode='bilinear')
 
                 output = torch.argmax(_output, 1, keepdim=True).float()
@@ -190,6 +194,12 @@ if __name__ == '__main__':
                         help='Path for checkpoints and logs')
     parser.add_argument('--resume', type=str, default=None,
                         help='Checkpoint file to resume')
+    
+    # Debug option
+    parser.add_argument('--multi_scale', type=str, default=None,
+                        help='None for origin setting;\n \
+                        (a) for residual 1\&5 plus;\n \
+                        (b) for residual 1\&5 cat;\n')
 
     args = parser.parse_args()
 

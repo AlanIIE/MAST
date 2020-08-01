@@ -12,19 +12,15 @@
             "console": "integratedTerminal",
             "args": [
                 "--savepath",
-                "../../LOG/MAST/results/debug",
-                "--resume",
-                "../../LOG/MAST/results/debug",
+                "~/LOG/MAST/results/debug",
                 "--epoch",
                 "21",
-                "--mode",
-                "slower",
-                "--bsize",
-                "32",
                 "--worker",
-                "32"
+                "12",
+                "--bsize",
+                "12",
             ]
-        }
+        },
         {
             "name": "benchmark.py",
             "type": "python",
@@ -33,15 +29,15 @@
             "console": "integratedTerminal",
             "args": [
                 "--resume",
-                "../../LOG/MAST/results/official/released_checkpoint.pt",
+                "../../LOG/MAST/results/debug/debug_checkpoint.pt",
                 "--datapath",
                 "~/DataSets/DAVIS/davis/DAVIS/",
                 "--savepath",
-                "../../LOG/MAST/results/official",
+                "../../LOG/MAST/results/debug",
                 "--ref",
                 "0",
                 "--mode",
-                "slower"
+                "slower",
             ]
         }
     ]

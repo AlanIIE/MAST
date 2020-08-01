@@ -60,18 +60,20 @@ class Colorizer(nn.Module):
             return corr.cuda()
         else:
             col_0 = deform_im2col(feats_r[searching_index], offset0, kernel_size=self.P, mode = self.mode)  # b,c*N,h*w
+            torch.cuda.empty_cache()
             col_0 = col_0.reshape(b,c,N,h,w)
             ##
-            if self.mode == 'faster':
+            if self.mode == 'faster' or self.training:
                 return (feats_t.unsqueeze(2) * col_0).sum(1)   # (b, N, h, w)
             else:
                 # col_0[:,0,] = feats_t.unsqueeze(2)[:,0,]*col_0[:,0,]
                 # col_0[:,1:,] = feats_t.unsqueeze(2)[:,1:,]*col_0[:,1:,]
+                # corr = torch.zeros(col_0.shape).cuda()
                 for batch in range(c//16):
                     col_0[:,16*batch:16*(batch+1),] = feats_t.unsqueeze(2)[:,16*batch:16*(batch+1),]*col_0[:,16*batch:16*(batch+1),]
             return col_0.sum(1)
 
-    def forward(self, feats_r, feats_t, quantized_r, ref_index, current_ind, dil_int = 15):
+    def forward(self, feats_r, feats_t, quantized_r, ref_index, current_ind, dirates=None, nsearch=2, dil_int = 15):
         """
         Warp y_t to y_(t+n). Using similarity computed with im (t..t+n)
         :param feats_r: f([im1, im2, im3])
@@ -82,10 +84,12 @@ class Colorizer(nn.Module):
         """
         # For frame interval < dil_int, no need for deformable resampling
         nref = len(feats_r)
-        nsearch = len([x for x in ref_index if current_ind - x > dil_int])
+        if self.training == False:
+            nsearch = len([x for x in ref_index if current_ind - x > dil_int])
 
         # The maximum dilation rate is 4
-        dirates = [ min(4, (current_ind - x) // dil_int +1) for x in ref_index if current_ind - x > dil_int]
+        if dirates == None:
+            dirates = [ min(4, (current_ind - x) // dil_int +1) for x in ref_index if current_ind - x > dil_int]
         b,c,h,w = feats_t.size()
         N = self.P * self.P
         corrs = []
@@ -119,7 +123,7 @@ class Colorizer(nn.Module):
 
         qr = [self.prep(qr, (h,w)) for qr in quantized_r]
 
-        im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P,mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
+        im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P, mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
         im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
         image_uf = im_col0 + im_col1
 
