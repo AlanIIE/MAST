@@ -129,7 +129,11 @@ class Colorizer(nn.Module):
 
         image_uf = [uf.reshape([b,qr[0].size(1),self.P*self.P,h*w]) for uf in image_uf]
         image_uf = torch.cat(image_uf, 2)
-        if self.training or self.mode == 'cpu' or self.mode == 'faster':
+        if  self.training:
+            out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
+
+            return out, corr
+        elif self.mode == 'cpu' or self.mode == 'faster':
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
 
             return out

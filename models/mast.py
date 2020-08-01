@@ -19,8 +19,8 @@ class MAST(nn.Module):
         self.feature_extraction = ResNet18(3)
         self.post_convolution4 = nn.Conv2d(256, 64, 3, 1, 1)
         if self.args.multi_scale=='a' or self.args.multi_scale=='b':
-            self.post_convolution0 = nn.Conv2d(64, 64, 3, 2, 1) # new layer would cause OUTOFMEMORY in test
-            # self.post_convolution1 = nn.Conv2d(64, 64, 3, 2, 1)
+            # self.post_convolution0 = nn.Conv2d(64, 64, 3, 2, 1) # new layer would cause OUTOFMEMORY in test
+            self.post_convolution1 = nn.Conv2d(64, 64, 3, 2, 1)
             # self.post_convolution2 = nn.Conv2d(128, 64, 3, 1, 1)
             # self.post_convolution3 = nn.Conv2d(256, 64, 3, 1, 1)
         self.D = 4
@@ -40,27 +40,28 @@ class MAST(nn.Module):
             feats_r = []
             for rgb in rgb_r:
                 feats_r_all = self.feature_extraction(rgb)
-                feats_r.append(self.post_convolution0(feats_r_all[0])+self.post_convolution4(feats_r_all[4]))
+                feats_r.append(self.post_convolution1(feats_r_all[0])+self.post_convolution4(feats_r_all[4]))
         elif self.args.multi_scale=='b':
             feats_r = []
             for rgb in rgb_r:
                 feats_r_all = self.feature_extraction(rgb)
-                feats_r.append(torch.cat((self.post_convolution0(feats_r_all[0]),self.post_convolution4(feats_r_all[4])), 1))
+                feats_r.append(torch.cat((self.post_convolution1(feats_r_all[0]),self.post_convolution4(feats_r_all[4])), 1))
         if self.args.multi_scale==None:
             feats_t = self.post_convolution4(self.feature_extraction(rgb_t)[4])
         elif self.args.multi_scale=='a':
             feats_t_all = self.feature_extraction(rgb_t)
-            feats_t = self.post_convolution0(feats_t_all[0])+self.post_convolution4(feats_t_all[4])
+            feats_t = self.post_convolution1(feats_t_all[0])+self.post_convolution4(feats_t_all[4])
         elif self.args.multi_scale=='b':
             feats_t_all = self.feature_extraction(rgb_t)
-            feats_t = torch.cat((self.post_convolution0(feats_t_all[0]),self.post_convolution4(feats_t_all[4])), 1)
+            feats_t = torch.cat((self.post_convolution1(feats_t_all[0]),self.post_convolution4(feats_t_all[4])), 1)
 
         if self.args.training:
             quantized_t = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind, 
                                     dirates, self.args.num_long, self.args.dil_int)
+            return quantized_t
         else:
             quantized_t = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind)
-        return quantized_t
+            return quantized_t
 
 
     def dropout2d_lab(self, arr): # drop same layers for all images

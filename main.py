@@ -72,7 +72,7 @@ def main():
     for key, value in sorted(vars(args).items()):
         log.info(str(key) + ': ' + str(value))
 
-    dirates = 1#np.random.choice([1,2,3,4])
+    dirates = np.random.choice([1,2,3,4])
     TrainData, frame_indices = Y.dataloader(args.csvpath, args.num_long, args.ref_num, args.dil_int, dirates)
     TrainImgLoader = torch.utils.data.DataLoader(
         YL.myImageFloder(args.datapath, TrainData, frame_indices, True),
@@ -133,7 +133,6 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
     b_s = time.perf_counter()
 
     for b_i, (images_lab, images_rgb_, images_quantized, ref_index) in enumerate(dataloader):
-        # if epoch == 0: continue
         model.train()
 
         adjust_lr(optimizer, epoch, b_i, n_b)

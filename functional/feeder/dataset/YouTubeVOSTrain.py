@@ -27,14 +27,17 @@ def dataloader(csv_path="ytvos.csv", num_long=2, ref_num=3, dil_int=15, dirates=
         start_frame = startframe[index]
         if True:
             if dirates == 4:
-                frame_set = range((dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1,
+                frame_set = range(max(start_frame,(dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
                                 start_frame+n_frames-(ref_num-1)*frame_interval-1)
             else:
-                frame_set = range(max(start_frame,(dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
-                                dirates*dil_int+start_frame+frame_interval*(num_long-ref_num)-2)
+                frame_set = range(max(start_frame,
+                                      (dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
+                                  min(start_frame+n_frames-(ref_num-1)*frame_interval-1, 
+                                      dirates*dil_int+start_frame+frame_interval*(num_long-ref_num)-1))
             # frame_set = range(start_frame+frame_interval+dil_int, start_frame+n_frames-(ref_num-1)*frame_interval-1)
             if frame_set:
                 frame_set = np.random.choice(frame_set)
+                # frame_set = frame_set[-1]
             else:
                 continue
             frame_indices_batches = [[x for x in range(frame_set,frame_set+frame_interval*(ref_num-1)+1,frame_interval)]]
@@ -49,6 +52,8 @@ def dataloader(csv_path="ytvos.csv", num_long=2, ref_num=3, dil_int=15, dirates=
             batches = np.sort(np.concatenate((batches,
                                 list(range(start_frame, start_frame+frame_interval*(num_long-1)+1,frame_interval))+
                                 [frame_set+frame_interval*(ref_num-1)+1])))
+            if frame_set+frame_interval*(ref_num-1)+1>n_frames+start_frame:
+                print(index)
             # ref_images = [os.path.join(frame_all[index], '{:05d}.jpg'.format(frame))
             #               for frame in [max(start_frame,batches[0]-30)]+ list(batches)]
             ref_images = [os.path.join(frame_all[index], '{:05d}.jpg'.format(frame))
