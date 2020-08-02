@@ -56,6 +56,8 @@ parser.add_argument('--dil_int', type=int, default=15,
                     help='For frame interval < dil_int, no need for deformable resampling, default 15.')
 parser.add_argument('--num_short', dest='ref_num', type=int, default=3,
                     help='Short term memory.')
+parser.add_argument('--w_s', type=float, default=1,
+                    help='Weight for smoothness loss.')
 
 args = parser.parse_args()
 
@@ -212,11 +214,10 @@ def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     ref_index = [index[:,ind] for ind in range(index.shape[1]-1)] #list(5),each with 12 elements
     tar_index = index[:,-1]
 
- ##### 这里的batchsize要和worker对应上，现在要给ref里面有多个数据
-    outputs = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
+    outputs, smoothness_loss = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
 
     outputs = F.interpolate(outputs, (h, w), mode='bilinear')
-    loss = F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean')
+    loss = F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean') + 100*smoothness_loss
 
     err_maps = torch.abs(outputs - tar_y).sum(1).detach()
 

@@ -5,6 +5,7 @@ from .submodule import one_hot
 from spatial_correlation_sampler import SpatialCorrelationSampler
 from .deform_im2col_util import deform_im2col
 import pdb
+import numpy as np
 
 class Colorizer(nn.Module):
     def __init__(self, D=4, R=6, C=32, mode='faster', training=False):
@@ -19,6 +20,7 @@ class Colorizer(nn.Module):
 
         self.training = training
         self.mode = mode
+        self.beta = 50
         self.memory_patch_R = 12
         self.memory_patch_P = self.memory_patch_R * 2 + 1
         self.memory_patch_N = self.memory_patch_P * self.memory_patch_P
@@ -48,6 +50,101 @@ class Colorizer(nn.Module):
             x = one_hot(x.long(), self.C)
 
         return x
+
+
+    def get_flow(self, grid):
+        grid_x = grid[...,[0]].permute(0,3,1,2)
+        grid_y = grid[...,[0]].permute(0,3,1,2)
+        b, _, h, w = grid_x.size()
+        # regular grid / [-1,1] normalized
+        grid_X, grid_Y = np.meshgrid(np.linspace(-1, 1, w),
+                                                np.linspace(-1, 1, h))  # grid_X & grid_Y : feature_H x feature_W
+        grid_X = torch.tensor(grid_X, dtype=torch.float, requires_grad=False).cuda()
+        grid_Y = torch.tensor(grid_Y, dtype=torch.float, requires_grad=False).cuda()
+
+        grid_X = grid_X.expand(b, h, w)  # x coordinates of a regular grid
+        grid_X = grid_X.unsqueeze(1)  # b x 1 x h x w
+        grid_Y = grid_Y.expand(b, h, w)  # y coordinates of a regular grid
+        grid_Y = grid_Y.unsqueeze(1)
+
+        flow = torch.cat((grid_x - grid_X, grid_y - grid_Y),
+                            1)  # 2-channels@1st-dim, first channel for x / second channel for y
+        return flow
+
+    def get_flow_smoothness(self, flow):
+        # kernels for computing gradients
+        dx_kernel = torch.tensor([-1, 0, 1],
+                                        dtype=torch.float,
+                                        requires_grad=False).view(1, 1, 1, 3).expand(1, 2, 1, 3).cuda()
+        dy_kernel = torch.tensor([-1, 0, 1],
+                                        dtype=torch.float,
+                                        requires_grad=False).view(1, 1, 3, 1).expand(1, 2, 3, 1).cuda()
+
+        flow_dx = F.conv2d(F.pad(flow, (1, 1, 0, 0)), dx_kernel) / 2  # (padLeft, padRight, padTop, padBottom)
+        flow_dy = F.conv2d(F.pad(flow, (0, 0, 1, 1)), dy_kernel) / 2  # (padLeft, padRight, padTop, padBottom)
+
+        flow_dx = torch.abs(flow_dx)
+        flow_dy = torch.abs(flow_dy)
+
+        smoothness = torch.cat((flow_dx, flow_dy), 1)
+        return smoothness
+
+
+    def kernel_soft_argmax(self, corr, kernel=False):
+        d = 1
+        b, hw, h, w = corr.size()
+
+        # apply_gaussian_kernel
+        idx = corr.max(dim=1)[1]  # b x h x w    get maximum value along channel
+        idx_y = (idx // w).view(b, 1, 1, h, w).float()
+        idx_x = (idx % w).view(b, 1, 1, h, w).float()
+
+
+        # 1-d indices for generating Gaussian kernels
+        x = np.linspace(0, self.P - 1, self.P)
+        x = torch.tensor(x, dtype=torch.float, requires_grad=False).cuda()
+        y = np.linspace(0, self.P - 1, self.P)
+        y = torch.tensor(y, dtype=torch.float, requires_grad=False).cuda()
+
+        x = x.view(1, 1, self.P, 1, 1).expand(b, 1, self.P, h, w)
+        y = y.view(1, self.P, 1, 1, 1).expand(b, self.P, 1, h, w)
+
+        if kernel:
+            gauss_kernel = torch.exp(-((x - idx_x) ** 2 + (y - idx_y) ** 2) / (2 * self.kernel_sigma ** 2))
+            gauss_kernel = gauss_kernel.view(b, hw, h, w)
+
+            corr = gauss_kernel * corr
+
+        # softmax_with_temperature
+        M, _ = corr.max(dim=d, keepdim=True)
+        corr = corr - M  # subtract maximum value for stability
+        # val = torch.empty(corr.size()).cuda()
+        # val.copy_(corr)
+        exp_x = torch.exp(self.beta * corr)
+        exp_x_sum = exp_x.sum(dim=d, keepdim=True)
+        corr = exp_x / exp_x_sum
+
+
+        corr = corr.view(-1, self.P, self.P, h, w)  # (target hxw) x (source hxw)
+
+
+        # 1-d indices for kernel-soft-argmax / [-1,1] normalized
+        x_normal = np.linspace(-1, 1, self.P)
+        x_normal = torch.tensor([x_normal], dtype=torch.float, requires_grad=False).cuda()
+        y_normal = np.linspace(-1, 1, self.P)
+        y_normal = torch.tensor(y_normal, dtype=torch.float, requires_grad=False).cuda()
+
+        grid_x = corr.sum(dim=1, keepdim=False)  # marginalize to x-coord.
+        x_normal = x_normal.expand(b, self.P)
+        x_normal = x_normal.view(b, self.P, 1, 1)
+        grid_x = (grid_x * x_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
+
+        grid_y = corr.sum(dim=2, keepdim=False)  # marginalize to y-coord.
+        y_normal = y_normal.expand(b, self.P)
+        y_normal = y_normal.view(b, self.P, 1, 1)
+        grid_y = (grid_y * y_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
+        grid = torch.cat((grid_x.permute(0, 2, 3, 1), grid_y.permute(0, 2, 3, 1)), 3)
+        return grid, corr#val
     
     def calculate_corr(self, feats_t, feats_r, searching_index, offset0):
         b,c,h,w = feats_t.size()
@@ -109,7 +206,7 @@ class Colorizer(nn.Module):
 
             corr = self.calculate_corr(feats_t, feats_r, searching_index, offset0)
 
-            corr = corr.reshape([b, self.P * self.P, h * w])
+            corr = corr.reshape([b, self.P * self.P, h * w]) # 把smoothness加进来，另外还有positional cycle consistency
             corrs.append(corr)
 
         for ind in range(nsearch, nref):
@@ -117,6 +214,23 @@ class Colorizer(nn.Module):
             _, _, _, h1, w1 = corrs[-1].size()
             corrs[ind] = corrs[ind].reshape([b, self.P*self.P, h1*w1])
 
+        if True:
+            corr = torch.cat(corrs, 0)  # b,nref*N,HW
+            grid, _ = self.kernel_soft_argmax(corr.reshape(-1,self.P*self.P,h,w)) # b, hw, h, w = corr.size()
+
+            qr = [self.prep(qr, (h,w)) for qr in quantized_r]
+            im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P, mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
+            im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
+            src_img = torch.cat(im_col0+im_col1, 0)
+
+            out = F.grid_sample(src_img.reshape(-1,self.P*self.P,h,w), grid, mode='bilinear')
+            ind_short = [list(range((i-1)*nref+nsearch,i*nref)) for i in range(1,b+1)]
+            flow = self.get_flow(grid[ind_short,...].reshape(-1,h,w,2))
+            smoothness = self.get_flow_smoothness(flow)
+
+            return [out.reshape(-1,nref*self.P*self.P,h,w).sum(1).reshape([b,qr[0].size(1),h,w]),
+                    torch.mean(smoothness)]
+        
         corr = torch.cat(corrs, 1)  # b,nref*N,HW
         corr = F.softmax(corr, dim=1)
         corr = corr.unsqueeze(1)
