@@ -191,6 +191,12 @@ if __name__ == '__main__':
     parser.add_argument('--resume', type=str, default=None,
                         help='Checkpoint file to resume')
 
+    # Debug option
+    parser.add_argument('--multi_scale', type=str, default=None,
+                        help='None for origin setting;\n \
+                        (a) for residual 1\&5 plus;\n \
+                        (b) for residual 1\&5 cat;\n')
+
     args = parser.parse_args()
 
     main()

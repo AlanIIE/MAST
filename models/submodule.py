@@ -60,8 +60,8 @@ class ResNet18(nn.Module):
         layer2_feat = self.layer2(layer1_feat)
         layer3_feat = self.layer3(layer2_feat)
         layer4_feat = self.layer4(layer3_feat)
-        # return conv1_feat, layer1_feat, layer2_feat, layer3_feat, layer4_feat
-        return layer4_feat
+        return conv1_feat, layer1_feat, layer2_feat, layer3_feat, layer4_feat
+        # return layer4_feat
 
 
 def one_hot(labels, C):

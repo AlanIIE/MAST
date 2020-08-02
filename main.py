@@ -51,8 +51,10 @@ def main():
 
     if not os.path.isdir(args.savepath):
         os.makedirs(args.savepath)
-    log = logger.setup_logger(args.savepath + '/training.log')
-    writer = SummaryWriter(args.savepath + '/runs/')
+
+    TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S}".format(datetime.now())
+    log = logger.setup_logger(args.savepath + '/training'+TIMESTAMP+'.log')
+    writer = SummaryWriter(args.savepath + '/runs_'+TIMESTAMP)
 
     for key, value in sorted(vars(args).items()):
         log.info(str(key) + ': ' + str(value))
