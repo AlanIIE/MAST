@@ -16,9 +16,16 @@
                 "--epoch",
                 "21",
                 "--worker",
-                "12",
+                "2",
                 "--bsize",
-                "12",
+                "2",
+                "--num_long",
+                "0",
+                "--num_short",
+                "1",
+                "--ksargmax",
+                "--multi_scale",
+                "a"
             ]
         },
         {
@@ -38,6 +45,9 @@
                 "0",
                 "--mode",
                 "slower",
+                "--multi_scale",
+                "a",
+                "--ksargmax"
             ]
         }
     ]

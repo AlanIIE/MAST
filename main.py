@@ -56,8 +56,10 @@ parser.add_argument('--dil_int', type=int, default=15,
                     help='For frame interval < dil_int, no need for deformable resampling, default 15.')
 parser.add_argument('--num_short', dest='ref_num', type=int, default=3,
                     help='Short term memory.')
-parser.add_argument('--w_s', type=float, default=1,
+parser.add_argument('--w_s', type=float, default=0.1,
                     help='Weight for smoothness loss.')
+parser.add_argument('--ksargmax', action='store_true', dest='ksargmax', default=False,
+                    help='Use kernel soft argmax.')
 
 args = parser.parse_args()
 
@@ -131,6 +133,8 @@ iteration = 0
 def train(dataloader, model, optimizer, log, writer, epoch, dirates):
     global iteration
     _loss = AverageMeter()
+    rec_loss = AverageMeter()
+    smo_loss = AverageMeter()
     n_b = len(dataloader)
     b_s = time.perf_counter()
 
@@ -144,19 +148,25 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
         images_rgb_ = [r.cuda() for r in images_rgb_]
 
         _, ch = model.module.dropout2d_lab(images_lab)
-        sum_loss, err_maps = compute_lphoto(model, images_lab, images_lab_gt, ch, ref_index, dirates)
+        loss, err_maps = compute_lphoto(model, images_lab, images_lab_gt, ch, ref_index, dirates)
+        
+        sum_loss = loss[0]+loss[1]
 
         sum_loss.backward()
 
         optimizer.step()
         optimizer.zero_grad()
 
+        rec_loss.update(loss[0].item())
+        smo_loss.update(loss[1].item())
         _loss.update(sum_loss.item())
 
         iteration = iteration + 1
         writer.add_scalar("Training loss", sum_loss.item(), iteration)
 
-        info = 'Loss = {:.3f}({:.3f})'.format(_loss.val, _loss.avg)
+        info = 'Loss = {:.3f}({:.3f}), '.format(_loss.val, _loss.avg)+\
+               'reconstruction loss: {:.3f}({:.3f}), '.format(rec_loss.val, rec_loss.avg) + \
+               'smoothness loss: {:.3f}({:.3f}). '.format(smo_loss.val, smo_loss.avg)
         b_t = time.perf_counter() - b_s
         b_s = time.perf_counter()
 
@@ -217,7 +227,7 @@ def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     outputs, smoothness_loss = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
 
     outputs = F.interpolate(outputs, (h, w), mode='bilinear')
-    loss = F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean') + 100*smoothness_loss
+    loss = [F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean'), args.w_s*torch.mean(smoothness_loss)]
 
     err_maps = torch.abs(outputs - tar_y).sum(1).detach()
 

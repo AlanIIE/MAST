@@ -8,7 +8,7 @@ import pdb
 import numpy as np
 
 class Colorizer(nn.Module):
-    def __init__(self, D=4, R=6, C=32, mode='faster', training=False):
+    def __init__(self, D=4, R=6, C=32, mode='faster', training=False, ksargmax=True):
         super(Colorizer, self).__init__()
         self.D = D
         self.R = R  # window size
@@ -21,6 +21,7 @@ class Colorizer(nn.Module):
         self.training = training
         self.mode = mode
         self.beta = 50
+        self.ksargmax=ksargmax
         self.memory_patch_R = 12
         self.memory_patch_P = self.memory_patch_R * 2 + 1
         self.memory_patch_N = self.memory_patch_P * self.memory_patch_P
@@ -200,9 +201,9 @@ class Colorizer(nn.Module):
             coarse_search_correlation = F.softmax(coarse_search_correlation, dim=1)
             coarse_search_correlation = coarse_search_correlation.reshape(b,self.memory_patch_P,self.memory_patch_P,h,w,1)
             _y, _x = torch.meshgrid(torch.arange(-self.memory_patch_R,self.memory_patch_R+1),torch.arange(-self.memory_patch_R,self.memory_patch_R+1))
-            grid = torch.stack([_x, _y], dim=-1).unsqueeze(-2).unsqueeze(-2)\
+            _grid = torch.stack([_x, _y], dim=-1).unsqueeze(-2).unsqueeze(-2)\
                 .reshape(1,self.memory_patch_P,self.memory_patch_P,1,1,2).contiguous().float().to(coarse_search_correlation.device)
-            offset0 = (coarse_search_correlation * grid ).sum(1).sum(1) * dirates[searching_index]  # 1,h,w,2
+            offset0 = (coarse_search_correlation * _grid ).sum(1).sum(1) * dirates[searching_index]  # 1,h,w,2
 
             corr = self.calculate_corr(feats_t, feats_r, searching_index, offset0)
 
@@ -214,26 +215,27 @@ class Colorizer(nn.Module):
             _, _, _, h1, w1 = corrs[-1].size()
             corrs[ind] = corrs[ind].reshape([b, self.P*self.P, h1*w1])
 
-        if True:
-            corr = torch.cat(corrs, 0)  # b,nref*N,HW
-            grid, _ = self.kernel_soft_argmax(corr.reshape(-1,self.P*self.P,h,w)) # b, hw, h, w = corr.size()
+        if self.ksargmax:
+            corr = torch.cat(corrs, 0)  # b*nref,N,HW
+            grid, corr = self.kernel_soft_argmax(corr.reshape(-1,self.P*self.P,h,w)) # b, hw, h, w = corr.size()
+            corr = corr.reshape(b,1,self.N*nref,h*w)
+            # qr = [self.prep(qr, (h,w)) for qr in quantized_r]
+            # im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P, mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
+            # im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
+            # src_img = torch.cat(im_col0+im_col1, 0)
+            # out = F.grid_sample(src_img.reshape(-1,self.P*self.P,h,w), grid, mode='bilinear')
 
-            qr = [self.prep(qr, (h,w)) for qr in quantized_r]
-            im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P, mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
-            im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
-            src_img = torch.cat(im_col0+im_col1, 0)
+            # out = F.grid_sample(src_img.reshape(-1,self.N,h,w).mean(1,keepdim=True), 
+            #                     grid.repeat(self.C,1,1,1), 
+            #                     mode='bilinear')
+            # out = out.reshape(b,-1,h,w)
+        else:        
+            corr = torch.cat(corrs, 1)  # b,nref*N,HW
+            corr = F.softmax(corr, dim=1)
+            corr = corr.unsqueeze(1)
+            grid = torch.zeros(b*nref,h,w,2).cuda() # edit here to try softmax
 
-            out = F.grid_sample(src_img.reshape(-1,self.P*self.P,h,w), grid, mode='bilinear')
-            ind_short = [list(range((i-1)*nref+nsearch,i*nref)) for i in range(1,b+1)]
-            flow = self.get_flow(grid[ind_short,...].reshape(-1,h,w,2))
-            smoothness = self.get_flow_smoothness(flow)
 
-            return [out.reshape(-1,nref*self.P*self.P,h,w).sum(1).reshape([b,qr[0].size(1),h,w]),
-                    torch.mean(smoothness)]
-        
-        corr = torch.cat(corrs, 1)  # b,nref*N,HW
-        corr = F.softmax(corr, dim=1)
-        corr = corr.unsqueeze(1)
 
         qr = [self.prep(qr, (h,w)) for qr in quantized_r]
 
@@ -243,17 +245,20 @@ class Colorizer(nn.Module):
 
         image_uf = [uf.reshape([b,qr[0].size(1),self.P*self.P,h*w]) for uf in image_uf]
         image_uf = torch.cat(image_uf, 2)
+
         if  self.training:
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
 
-            return out, corr
+            ind_short = [list(range((i-1)*nref+nsearch,i*nref)) for i in range(1,b+1)]
+            flow = self.get_flow(grid[ind_short,...].reshape(-1,h,w,2))
+            smoothness = self.get_flow_smoothness(flow)
+
+            return [out, smoothness]
         elif self.mode == 'cpu' or self.mode == 'faster':
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
-
+ 
             return out
         else:
-            # image_uf[:,0,:,:] = (corr * image_uf[:,0,:,:])
-            # image_uf[:,1:,:,:] = (corr * image_uf[:,1:,:,:])
             if corr.shape[1] == 1:
                 for batch in range(image_uf.shape[1]):
                     image_uf[:,batch,:,:] = image_uf[:,batch,:,:]*corr

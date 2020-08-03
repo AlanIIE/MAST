@@ -200,6 +200,8 @@ if __name__ == '__main__':
                         help='None for origin setting;\n \
                         (a) for residual 1\&5 plus;\n \
                         (b) for residual 1\&5 cat;\n')
+    parser.add_argument('--ksargmax', action='store_true', dest='ksargmax', default=False,
+                    help='Use kernel soft argmax.')
 
     args = parser.parse_args()
 

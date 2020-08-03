@@ -40,10 +40,7 @@ class myImageFloder(data.Dataset):
         refs = self.refs[index]
 
         images = [image_loader(os.path.join(self.filepath, ref)) for ref in refs]
-        try:
-            images_lab = [lab_preprocess(ref) for ref in images]
-        except:
-            print(refs)
+        images_lab = [lab_preprocess(ref) for ref in images]
         images_rgb = [rgb_preprocess(ref) for ref in images]
 
         return images_lab, images_rgb, 1, self.frame_indices[index]
