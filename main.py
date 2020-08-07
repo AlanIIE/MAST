@@ -58,6 +58,8 @@ parser.add_argument('--num_short', dest='ref_num', type=int, default=3,
                     help='Short term memory.')
 parser.add_argument('--w_s', type=float, default=0.1,
                     help='Weight for smoothness loss.')
+parser.add_argument('--w_c', type=float, default=1.0,
+                    help='Weight for flow cycle consistency loss.')
 parser.add_argument('--ksargmax', action='store_true', dest='ksargmax', default=False,
                     help='Use kernel soft argmax.')
 
@@ -134,6 +136,7 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
     global iteration
     _loss = AverageMeter()
     rec_loss = AverageMeter()
+    cyc_loss = AverageMeter()
     smo_loss = AverageMeter()
     n_b = len(dataloader)
     b_s = time.perf_counter()
@@ -150,7 +153,7 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
         _, ch = model.module.dropout2d_lab(images_lab)
         loss, err_maps = compute_lphoto(model, images_lab, images_lab_gt, ch, ref_index, dirates)
         
-        sum_loss = loss[0]+loss[1]
+        sum_loss = loss[0]+loss[1]+loss[2]
 
         sum_loss.backward()
 
@@ -159,6 +162,7 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
 
         rec_loss.update(loss[0].item())
         smo_loss.update(loss[1].item())
+        cyc_loss.update(loss[2].item())
         _loss.update(sum_loss.item())
 
         iteration = iteration + 1
@@ -166,6 +170,7 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
 
         info = 'Loss = {:.3f}({:.3f}), '.format(_loss.val, _loss.avg)+\
                'reconstruction loss: {:.3f}({:.3f}), '.format(rec_loss.val, rec_loss.avg) + \
+               'cycle loss: {:.3f}({:.3f}), '.format(cyc_loss.val, cyc_loss.avg) + \
                'smoothness loss: {:.3f}({:.3f}). '.format(smo_loss.val, smo_loss.avg)
         b_t = time.perf_counter() - b_s
         b_s = time.perf_counter()
@@ -224,10 +229,12 @@ def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     ref_index = [index[:,ind] for ind in range(index.shape[1]-1)] #list(5),each with 12 elements
     tar_index = index[:,-1]
 
-    outputs, smoothness_loss = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
+    outputs, smoothness_loss, cycle = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
 
     outputs = F.interpolate(outputs, (h, w), mode='bilinear')
-    loss = [F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean'), args.w_s*torch.mean(smoothness_loss)]
+    loss = [F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean'), 
+            args.w_s*torch.mean(smoothness_loss),
+            args.w_c*nn.MSELoss(reduction="mean")(cycle[0],cycle[1])]
 
     err_maps = torch.abs(outputs - tar_y).sum(1).detach()
 

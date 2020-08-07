@@ -13,3 +13,10 @@ python benchmark.py --resume ~/LOG/MAST/results/official/released_checkpoint.pt 
 cd ../davis2017-evaluation/
 conda activate DAVIS
 python evaluation_method.py --task semi-supervised --results_path  ~/LOG/MAST/results/official/benchmark
+
+
+memory_smoothness_0_1: +smoothness
+orig_test: orig without smoothness loss
+memory_2_3: CUDA_VISIBLE_DEVICES=1,2 python main.py --savepath ~/kuang/LOG/MAST/results/memory_2_3 --datapath ~/kuang/YouTube_VOS/train_all_frames/JPEGImages/ --bsize 8 --worker 8 --num_long 2 --num_short 3 --w_s 0.0
+memory_smoothness_2_3:CUDA_VISIBLE_DEVICES=3,4 python main.py --savepath ~/kuang/LOG/MAST/results/memory_smoothness_2_3 --datapath ~/kuang/YouTube_VOS/train_all_frames/JPEGImages/ --bsize 8 --worker 8 --num_long 2 --num_short 3 --w_s 10.0 --ksargmax  
+memory

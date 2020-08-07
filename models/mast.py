@@ -56,9 +56,9 @@ class MAST(nn.Module):
             feats_t = torch.cat((self.post_convolution1(feats_t_all[0]),self.post_convolution(feats_t_all[4])), 1)
 
         if self.args.training:
-            quantized_t, smooth = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind, 
+            quantized_t, smooth, cycle = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind, 
                                     dirates, self.args.num_long, self.args.dil_int)
-            return quantized_t, smooth
+            return quantized_t, smooth, cycle
         else:
             quantized_t = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind)
             return quantized_t

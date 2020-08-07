@@ -21,6 +21,7 @@ class Colorizer(nn.Module):
         self.training = training
         self.mode = mode
         self.beta = 50
+        self.kernel_sigma = 1.0
         self.ksargmax=ksargmax
         self.memory_patch_R = 12
         self.memory_patch_P = self.memory_patch_R * 2 + 1
@@ -91,15 +92,28 @@ class Colorizer(nn.Module):
         return smoothness
 
 
+    def get_grid(self, corr, kernel=False):
+        d = 1
+        b, hw, h, w = corr.size()
+        
+        x_normal = np.linspace(-1, 1, w)
+        y_normal = np.linspace(-1, 1, h)
+        x_normal = torch.tensor(x_normal, dtype=torch.float, requires_grad=False).cuda()
+        y_normal = torch.tensor(y_normal, dtype=torch.float, requires_grad=False).cuda()
+        x_normal,y_normal = torch.meshgrid(x_normal,y_normal)
+        x_grid = F.unfold(x_normal.reshape(1,1,h,w), kernel_size=self.P, padding =self.R)
+        y_grid = F.unfold(y_normal.reshape(1,1,h,w), kernel_size=self.P, padding =self.R)
+        x_grid = (corr.reshape(b,hw,h*w) * x_grid).sum(1).reshape([b,h,w,1])
+        y_grid = (corr.reshape(b,hw,h*w) * y_grid).sum(1).reshape([b,h,w,1])
+        grid = torch.cat((x_grid, y_grid), 3)
+        return grid
+
     def kernel_soft_argmax(self, corr, kernel=False):
         d = 1
         b, hw, h, w = corr.size()
 
         # apply_gaussian_kernel
-        idx = corr.max(dim=1)[1]  # b x h x w    get maximum value along channel
-        idx_y = (idx // w).view(b, 1, 1, h, w).float()
-        idx_x = (idx % w).view(b, 1, 1, h, w).float()
-
+        idx_x=idx_y=torch.tensor((self.P-1)/2, dtype=torch.float, requires_grad=False).cuda().reshape(1,1,1)
 
         # 1-d indices for generating Gaussian kernels
         x = np.linspace(0, self.P - 1, self.P)
@@ -107,14 +121,12 @@ class Colorizer(nn.Module):
         y = np.linspace(0, self.P - 1, self.P)
         y = torch.tensor(y, dtype=torch.float, requires_grad=False).cuda()
 
-        x = x.view(1, 1, self.P, 1, 1).expand(b, 1, self.P, h, w)
-        y = y.view(1, self.P, 1, 1, 1).expand(b, self.P, 1, h, w)
+        x = x.view(1, 1, self.P).expand(1, 1, self.P)
+        y = y.view(1, self.P, 1).expand(1, self.P, 1)
 
-        if kernel:
-            gauss_kernel = torch.exp(-((x - idx_x) ** 2 + (y - idx_y) ** 2) / (2 * self.kernel_sigma ** 2))
-            gauss_kernel = gauss_kernel.view(b, hw, h, w)
-
-            corr = gauss_kernel * corr
+        gauss_kernel = torch.exp(-((x - idx_x) ** 2 + (y - idx_y) ** 2) / (2 * self.kernel_sigma ** 2))
+        gauss_kernel = gauss_kernel.reshape(1,self.P**2,1,1).expand(b,self.P**2,h,w)
+        corr = gauss_kernel * corr            
 
         # softmax_with_temperature
         M, _ = corr.max(dim=d, keepdim=True)
@@ -127,25 +139,25 @@ class Colorizer(nn.Module):
 
 
         corr = corr.view(-1, self.P, self.P, h, w)  # (target hxw) x (source hxw)
+        
 
+        # # 1-d indices for kernel-soft-argmax / [-1,1] normalized
+        # x_normal = np.linspace(-1, 1, self.P)
+        # x_normal = torch.tensor([x_normal], dtype=torch.float, requires_grad=False).cuda()
+        # y_normal = np.linspace(-1, 1, self.P)
+        # y_normal = torch.tensor(y_normal, dtype=torch.float, requires_grad=False).cuda()
 
-        # 1-d indices for kernel-soft-argmax / [-1,1] normalized
-        x_normal = np.linspace(-1, 1, self.P)
-        x_normal = torch.tensor([x_normal], dtype=torch.float, requires_grad=False).cuda()
-        y_normal = np.linspace(-1, 1, self.P)
-        y_normal = torch.tensor(y_normal, dtype=torch.float, requires_grad=False).cuda()
+        # grid_x = corr.sum(dim=1, keepdim=False)  # marginalize to x-coord.
+        # x_normal = x_normal.expand(b, self.P)
+        # x_normal = x_normal.view(b, self.P, 1, 1)
+        # grid_x = (grid_x * x_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
 
-        grid_x = corr.sum(dim=1, keepdim=False)  # marginalize to x-coord.
-        x_normal = x_normal.expand(b, self.P)
-        x_normal = x_normal.view(b, self.P, 1, 1)
-        grid_x = (grid_x * x_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
-
-        grid_y = corr.sum(dim=2, keepdim=False)  # marginalize to y-coord.
-        y_normal = y_normal.expand(b, self.P)
-        y_normal = y_normal.view(b, self.P, 1, 1)
-        grid_y = (grid_y * y_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
-        grid = torch.cat((grid_x.permute(0, 2, 3, 1), grid_y.permute(0, 2, 3, 1)), 3)
-        return grid, corr#val
+        # grid_y = corr.sum(dim=2, keepdim=False)  # marginalize to y-coord.
+        # y_normal = y_normal.expand(b, self.P)
+        # y_normal = y_normal.view(b, self.P, 1, 1)
+        # grid_y = (grid_y * y_normal).sum(dim=1, keepdim=True)  # b x 1 x h x w
+        # grid = torch.cat((grid_x.permute(0, 2, 3, 1), grid_y.permute(0, 2, 3, 1)), 3)
+        return corr#val
     
     def calculate_corr(self, feats_t, feats_r, searching_index, offset0):
         b,c,h,w = feats_t.size()
@@ -207,7 +219,7 @@ class Colorizer(nn.Module):
 
             corr = self.calculate_corr(feats_t, feats_r, searching_index, offset0)
 
-            corr = corr.reshape([b, self.P * self.P, h * w]) # 把smoothness加进来，另外还有positional cycle consistency
+            corr = corr.reshape([b, self.P * self.P, h * w]) 
             corrs.append(corr)
 
         for ind in range(nsearch, nref):
@@ -217,25 +229,14 @@ class Colorizer(nn.Module):
 
         if self.ksargmax:
             corr = torch.cat(corrs, 0)  # b*nref,N,HW
-            grid, corr = self.kernel_soft_argmax(corr.reshape(-1,self.P*self.P,h,w)) # b, hw, h, w = corr.size()
+            corr = self.kernel_soft_argmax(corr.reshape(-1,self.P*self.P,h,w)) # b, hw, h, w = corr.size()
             corr = corr.reshape(b,1,self.N*nref,h*w)
-            # qr = [self.prep(qr, (h,w)) for qr in quantized_r]
-            # im_col0 = [deform_im2col(qr[i], offset0, kernel_size=self.P, mode = 'cpu')  for i in range(nsearch)]# b,3*N,h*w
-            # im_col1 = [F.unfold(r, kernel_size=self.P, padding =self.R) for r in qr[nsearch:]]
-            # src_img = torch.cat(im_col0+im_col1, 0)
-            # out = F.grid_sample(src_img.reshape(-1,self.P*self.P,h,w), grid, mode='bilinear')
-
-            # out = F.grid_sample(src_img.reshape(-1,self.N,h,w).mean(1,keepdim=True), 
-            #                     grid.repeat(self.C,1,1,1), 
-            #                     mode='bilinear')
-            # out = out.reshape(b,-1,h,w)
         else:        
             corr = torch.cat(corrs, 1)  # b,nref*N,HW
             corr = F.softmax(corr, dim=1)
             corr = corr.unsqueeze(1)
-            grid = torch.zeros(b*nref,h,w,2).cuda() # edit here to try softmax
 
-
+        grid = self.get_grid(corr.reshape(-1,self.P*self.P,h,w))
 
         qr = [self.prep(qr, (h,w)) for qr in quantized_r]
 
@@ -246,14 +247,20 @@ class Colorizer(nn.Module):
         image_uf = [uf.reshape([b,qr[0].size(1),self.P*self.P,h*w]) for uf in image_uf]
         image_uf = torch.cat(image_uf, 2)
 
+
         if  self.training:
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
 
+            # flow smoothness
             ind_short = [list(range((i-1)*nref+nsearch,i*nref)) for i in range(1,b+1)]
-            flow = self.get_flow(grid[ind_short,...].reshape(-1,h,w,2))
-            smoothness = self.get_flow_smoothness(flow)
+            flow = self.get_flow(grid.reshape(-1,h,w,2))
+            smoothness = self.get_flow_smoothness(flow[ind_short,...].reshape(-1,2,h,w))
 
-            return [out, smoothness]
+            # cycle flow within pariwised data
+            warp_flow = -F.grid_sample(flow, grid, mode='bilinear')
+            cycle = [warp_flow, flow]
+
+            return [out, smoothness, cycle]
         elif self.mode == 'cpu' or self.mode == 'faster':
             out = (corr * image_uf).sum(2).reshape([b,qr[0].size(1),h,w])
  
