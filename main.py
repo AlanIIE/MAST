@@ -19,6 +19,7 @@ import logger
 
 from models.mast import MAST
 
+# torch.cuda.set_device(1)
 parser = argparse.ArgumentParser(description='MAST')
 
 # Data options
@@ -56,6 +57,8 @@ parser.add_argument('--dil_int', type=int, default=15,
                     help='For frame interval < dil_int, no need for deformable resampling, default 15.')
 parser.add_argument('--num_short', dest='ref_num', type=int, default=3,
                     help='Short term memory.')
+parser.add_argument('--w_r', type=float, default=1.0,
+                    help='Weight for reconstruction loss.')
 parser.add_argument('--w_s', type=float, default=0.1,
                     help='Weight for smoothness loss.')
 parser.add_argument('--w_c', type=float, default=1.0,
@@ -78,7 +81,9 @@ def main():
     for key, value in sorted(vars(args).items()):
         log.info(str(key) + ': ' + str(value))
 
-    dirates = np.random.choice([1,2,3,4])
+    # dirates = np.random.choice([1,2,3,4])
+    dirates = 1
+    log.info("dirates = {}".format(dirates))
     TrainData, frame_indices = Y.dataloader(args.csvpath, args.num_long, args.ref_num, args.dil_int, dirates)
     TrainImgLoader = torch.utils.data.DataLoader(
         YL.myImageFloder(args.datapath, TrainData, frame_indices, True),
@@ -122,7 +127,9 @@ def main():
         log.info('This is {}-th epoch'.format(epoch))
         train(TrainImgLoader, model, optimizer, log, writer, epoch, [dirates for i in range(args.num_long)])
 
-        dirates = np.random.choice([1,2,3,4])
+        # dirates = np.random.choice([1,2,3,4])
+        dirates = 1
+        log.info("dirates = {}".format(dirates))
         TrainData, frame_indices = Y.dataloader(args.csvpath, args.num_long, args.ref_num, args.dil_int, dirates)
         TrainImgLoader = torch.utils.data.DataLoader(
             YL.myImageFloder(args.datapath, TrainData, frame_indices, True),
@@ -219,6 +226,12 @@ def train(dataloader, model, optimizer, log, writer, epoch, dirates):
         'optimizer': optimizer.state_dict(),
     }, savefilename)
 
+def lossfn_two_var(target1, target2, num_px = None):
+    if num_px is None:
+        return torch.sum(torch.pow((target1 - target2),2))
+    else:
+        return torch.sum(torch.pow((target1 - target2),2) / num_px)
+
 def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     b, c, h, w = image_lab[0].size()
 
@@ -232,9 +245,10 @@ def compute_lphoto(model, image_lab, images_rgb_, ch, index, dirates):
     outputs, smoothness_loss, cycle = model(ref_x, ref_y, tar_x, ref_index, tar_index, dirates)   # only train with pairwise data
 
     outputs = F.interpolate(outputs, (h, w), mode='bilinear')
-    loss = [F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean'), 
+    loss = [args.w_r*F.smooth_l1_loss(outputs*20, tar_y*20, reduction='mean'), 
             args.w_s*torch.mean(smoothness_loss),
-            args.w_c*nn.MSELoss(reduction="mean")(cycle[0],cycle[1])]
+            args.w_c*lossfn_two_var(cycle[0], cycle[1], num_px=cycle[1].shape[3]*cycle[1].shape[2])]
+            
 
     err_maps = torch.abs(outputs - tar_y).sum(1).detach()
 

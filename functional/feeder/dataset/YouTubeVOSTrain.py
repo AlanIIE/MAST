@@ -35,12 +35,28 @@ def dataloader(csv_path="ytvos.csv", num_long=2, ref_num=3, dil_int=15, dirates=
                 _frame_indices = _frame_indices[:-batch_mod]
             frame_indices_batches = np.split(_frame_indices, total_batch)
         elif num_long==0:
-            _frame_indices = np.arange(start_frame, start_frame+n_frames, frame_interval)  # start from startframe
+            _frame_indices = np.arange(start_frame, start_frame, frame_interval)  # start from startframe
             total_batch, batch_mod = divmod(len(_frame_indices), ref_num)
             if total_batch == 0: continue # fix the bug for ref_num>2
             if batch_mod > 0:
                 _frame_indices = _frame_indices[:-batch_mod]
             frame_indices_batches = np.split(_frame_indices, total_batch)
+        elif num_long==1 and ref_num==0:
+            if dirates == 4:
+                frame_set = range(max(start_frame,(dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
+                                start_frame+n_frames-(ref_num-1)*frame_interval-1)
+            else:
+                frame_set = range(max(start_frame,
+                                      (dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
+                                  min(start_frame+n_frames-(ref_num-1)*frame_interval-1, 
+                                      dirates*dil_int+start_frame+frame_interval*(num_long-ref_num)-1))
+            if not frame_set:
+                continue
+            interval = (dirates-1)*dil_int
+            while not (interval > (dirates-1)*dil_int and interval < dirates*dil_int):
+                frameset = np.random.choice(np.arange(start_frame,start_frame+n_frames), size=2, replace=False)
+                interval = np.abs(frameset[0]-frameset[1])
+            frame_indices_batches = [np.sort(frameset)]
         else:
             if dirates == 4:
                 frame_set = range(max(start_frame,(dirates-1)*dil_int+start_frame+frame_interval*(num_long-ref_num)-1),
@@ -57,8 +73,9 @@ def dataloader(csv_path="ytvos.csv", num_long=2, ref_num=3, dil_int=15, dirates=
             # else:
             #     continue
             frame_indices_batches = [list(range(fs,fs+frame_interval*(ref_num-1)+1,frame_interval)) for fs in frame_set]
+            frame_indices_batches = [frame_indices_batches[int(np.random.choice(len(frame_indices_batches),1))]]
         for batches in frame_indices_batches:
-            if not (ref_num==1 and num_long==0):
+            if not (ref_num+num_long==1):
                 batches = np.sort(np.concatenate((batches,
                                 list(range(start_frame, start_frame+frame_interval*(num_long-1)+1,frame_interval))+
                                 [batches[0]+frame_interval*(ref_num-1)+1])))

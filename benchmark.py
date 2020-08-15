@@ -16,7 +16,6 @@ from functional.utils.io import imwrite_indexed
 
 import logger
 
-
 def main():
     args.training = False
 
@@ -109,15 +108,91 @@ def test(dataloader, model, log):
             max_class = anno_1.max()
 
             with torch.no_grad():
-                _output = model(rgb_0, anno_0, rgb_1, ref_index, i+1)
+                _output, _ = model(rgb_0, anno_0, rgb_1, ref_index, i+1)
+                # _output, _ = model(rgb_0, anno_0, rgb_0[0], ref_index, i+1)
                 # rgb_0:    list(5),[1,3,480,910]
                 # anno_0:   list(5),[1,1,480,910]
                 # rgb_1:    tensor, [1,3,480,910]
-                # 
-                _output = F.interpolate(_output, (h,w), mode='bilinear')
 
+
+                # warp_grid = F.interpolate(_.permute(0,3,1,2), (h,w), mode='bilinear')
+                # _output = F.grid_sample(torch.cat(anno_0,0).float(), warp_grid.permute(0,2,3,1), mode='bilinear')
+                # output = F.interpolate(torch.mean(_output,0,keepdim=True), (h,w), mode='bilinear')
+                # outputs.append(torch.round(output).long())
+
+                _output = F.interpolate(_output, (h,w), mode='bilinear')
                 output = torch.argmax(_output, 1, keepdim=True).float()
                 outputs.append(output)
+
+                if i > 15:
+                    # draw flow from grid with cv2.line
+                    from functional.data import dataset
+                    from functional.utils import util
+                    import cv2
+                    warp_grid = F.interpolate(_, (h,w), mode='bilinear')
+                    # warp_grid = F.interpolate(_.permute(0,3,1,2), (h,w), mode='bilinear')
+
+                    # draw gate
+                    # util.save_image_tensor2cv2(warp_grid[0,...].unsqueeze(0), 'test.png', cv2.COLOR_GRAY2RGB)
+
+                    # draw grid or flow
+                    grid_x = warp_grid.permute(0,2,3,1)[...,[0]]
+                    grid_y = warp_grid.permute(0,2,3,1)[...,[1]]
+                    b=warp_grid.shape[0]
+                    # regular grid / [-1,1] normalized
+                    grid_X, grid_Y = np.meshgrid(np.linspace(-1, 1, w),
+                                                            np.linspace(-1, 1, h))  # grid_X & grid_Y : feature_H x feature_W
+                    grid_X = torch.tensor(grid_X, dtype=torch.float, requires_grad=False, device=warp_grid.device)
+                    grid_Y = torch.tensor(grid_Y, dtype=torch.float, requires_grad=False, device=warp_grid.device)
+
+                    grid_X = grid_X.expand(b, h, w)  # x coordinates of a regular grid
+                    grid_X = grid_X.unsqueeze(1)  # b x 1 x h x w
+                    grid_Y = grid_Y.expand(b, h, w)  # y coordinates of a regular grid
+                    grid_Y = grid_Y.unsqueeze(1)
+
+                    from functional.utils.track_vis import draw_track_trace, draw_trace_from_flow
+                    # draw pic from grid
+                    # source = torch.cat(((grid_Y.permute(0,2,3,1)+1)/2*h,(grid_X.permute(0,2,3,1)+1)/2*w),3).cpu()
+                    # target = torch.cat(((grid_y+1)/2*h,(grid_x+1)/2*w),3).cpu()
+                    # frame = (torch.cat(rgb_0,0)+1)/2*255
+                    # imgs_dbg = draw_track_trace(np.array(source),np.array(target),np.array(frame.permute(0,2,3,1).cpu()))
+                    # util.save_image_tensor2cv2(torch.tensor(imgs_dbg[0]/255).permute(2,0,1).unsqueeze(0), 'test1.png', cv2.COLOR_Lab2BGR)
+                    # util.save_image_tensor2cv2((rgb_1+1)/2, 'test2.png', cv2.COLOR_Lab2BGR)
+
+                    # draw pic from flow
+                    source = torch.cat(((grid_Y+1)/2*h,(grid_X+1)/2*w),1).permute(0,2,3,1).cpu()
+                    target = torch.cat(((warp_grid[:,1,...].unsqueeze(1)+grid_Y+1)/2*h,
+                                        (warp_grid[:,0,...].unsqueeze(1)+grid_X+1)/2*w),1).cpu()
+                    target = target.permute(0,2,3,1)
+                    # frame = torch.zeros((b,3,h,w))
+                    frame = (torch.cat(rgb_0,0)+1)/2*255
+                    imgs_dbg = draw_track_trace(np.array(source),np.array(target),np.array(frame.permute(0,2,3,1).cpu()))
+                    util.save_image_tensor2cv2(torch.tensor(imgs_dbg[0]/255).permute(2,0,1).unsqueeze(0), 'test.png')
+
+
+                    # draw dense flow map
+                    from functional.utils.flow_vis import flow_to_color
+                    tmp = flow_to_color(np.array((source[0,...]-target[0,...]).cpu()))
+                    util.save_image_tensor2cv2(torch.tensor(tmp).permute(2,0,1).unsqueeze(0), 'test.png')
+
+                # warp_grid = F.interpolate(_.permute(0,3,1,2), (h,w), mode='bilinear')
+                # pred_anno_1 = F.grid_sample(torch.cat(rgb_0,0), warp_grid.permute(0,2,3,1), mode='bilinear')
+
+                # util.save_image_tensor2cv2((rgb_0[0]+1)/2, 'test.png', cv2.COLOR_LAB2BGR)
+                # util.save_image_tensor2cv2((_output+1)/2, 'test.png', cv2.COLOR_LAB2BGR)
+                # util.save_image_tensor2cv2(torch.sum(anno_0[0], 1,keepdim=True), 'test.png', cv2.COLOR_GRAY2RGB)
+                
+                # util.save_image_tensor2cv2(anno_1[:,1,...].unsqueeze(1), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2(_[:,0,...].unsqueeze(1), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2(torch.tensor(_).permute(2,0,1).unsqueeze(0), 'test.png', cv2.COLOR_BGR2RGB)
+                # util.save_image_tensor2cv2(torch.tensor((frame[0]/frame[0].max()).transpose(0,3,1,2)), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2(torch.tensor((frame/frame[0].max()).transpose(0,3,1,2)), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2(torch.tensor((mask/mask[0].max()).transpose(0,3,1,2)), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2(torch.tensor(tmp).permute(2,0,1).unsqueeze(0), 'test.png')
+                # util.save_image_tensor2cv2(_[1,...].unsqueeze(0), 'test.png', cv2.COLOR_GRAY2RGB)
+                # util.save_image_tensor2cv2((pred_anno_1[0,...].unsqueeze(0)+1)/2, 'test.png', cv2.COLOR_Lab2BGR)
+                # util.save_image_tensor2cv2(dataset.UnNormalize()(rgb_0[0]), 'test.png', cv2.COLOR_Lab2BGR)
+                # util.save_image_tensor2cv2((rgb_1+1)/2, 'test.png', cv2.COLOR_Lab2BGR)
 
             js, fs = [], []
 

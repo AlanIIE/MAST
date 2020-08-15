@@ -2,13 +2,13 @@ import os
 import torch
 import torch.nn.functional as F
 
-def image_meshgrid_from(x):
+def image_meshgrid_from(shape,type,device):
     # input: b,c,h,w
     # output: b,c,h,2
-    shape = x.shape  # assume b,c,h,w
+    # shape assume b,c,h,w
     _y, _x = torch.meshgrid(torch.arange(shape[2]), torch.arange(shape[3]))
     grid = torch.stack([_x, _y], dim=-1)
-    return torch.stack([grid] * shape[0], dim=0).type(x.type()).to(x.device)
+    return torch.stack([grid] * shape[0], dim=0).type(type).to(device)
 
 
 def normalize_meshgrid(grid):
@@ -26,13 +26,14 @@ def deform_im2col(im, offset, kernel_size=3, mode='faster'):
     # input: b,c,h,w
     # output: b,N*c,h*w
     if mode == 'faster' or mode == 'cpu':
+        bo, ho, wo, co = offset.shape
         with torch.no_grad():
-            grid = image_meshgrid_from(im)
             b, c, h, w = im.shape
+            grid = image_meshgrid_from([b,c,ho,wo], im.type(),im.device)
 
         N = kernel_size * kernel_size
 
-        grid_ = torch.zeros(b * N, h, w, 2,  device=im.device).contiguous()
+        grid_ = torch.zeros(b * N, ho, wo, 2,  device=im.device).contiguous()
         im_ = im.repeat(N, 1, 1, 1)
 
         for dy in range(kernel_size):
@@ -41,17 +42,18 @@ def deform_im2col(im, offset, kernel_size=3, mode='faster'):
                     grid + offset + torch.tensor([dx - kernel_size // 2, dy - kernel_size // 2])[None, None, None, :].float().to(im.device)
 
         out = F.grid_sample(im_.contiguous(), normalize_meshgrid(grid_).contiguous())
-        out = out.reshape(N, b, c, h * w).permute(1,2,0,3)
+        out = out.reshape(N, b, c, ho * wo).permute(1,2,0,3)
 
-        return out.reshape(b, kernel_size * kernel_size * c, h * w)
+        return out.reshape(b, kernel_size * kernel_size * c, ho * wo)
     else:
+        bo, ho, wo, co = offset.shape
         with torch.no_grad():
-            grid = image_meshgrid_from(im)
             b, c, h, w = im.shape
+            grid = image_meshgrid_from([b,c,ho,wo], im.type(),im.device)
 
         N = kernel_size * kernel_size
 
-        out = torch.zeros(b * N, c, h, w,  device=im.device).contiguous()
+        out = torch.zeros(b * N, c, ho, wo,  device=im.device).contiguous()
 
         for dy in range(kernel_size):
             for dx in range(kernel_size):
@@ -59,7 +61,7 @@ def deform_im2col(im, offset, kernel_size=3, mode='faster'):
                 out[(dy * kernel_size + dx) * b:(dy * kernel_size + dx + 1) * b] = \
                     F.grid_sample(im.contiguous(), normalize_meshgrid(grid_).contiguous())
 
-        out = out.reshape(b, N, c, h * w)
+        out = out.reshape(b, N, c, ho * wo)
         for ind_b in range(b):
             # tmp = out[ind_b,].transpose(0,1).contiguous()
             # out[ind_b,] = tmp.reshape(N,c,h*w)
@@ -71,9 +73,9 @@ def deform_im2col(im, offset, kernel_size=3, mode='faster'):
             # out[ind_b,:,:,1:] = tmp.reshape(N,c,h*w-1)
 
 
-            for ind_r in range(0,w):
-                batchsize = h
+            for ind_r in range(0,wo):
+                batchsize = ho
                 tmp = out[ind_b,:,:,ind_r*batchsize:(ind_r+1)*batchsize].transpose(0,1).contiguous()
                 out[ind_b,:,:,ind_r*batchsize:(ind_r+1)*batchsize] = tmp.reshape(N,c,batchsize)
 
-        return out.reshape(b, kernel_size * kernel_size * c, h * w)
+        return out.reshape(b, kernel_size * kernel_size * c, ho * wo)

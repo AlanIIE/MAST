@@ -60,8 +60,8 @@ class MAST(nn.Module):
                                     dirates, self.args.num_long, self.args.dil_int)
             return quantized_t, smooth, cycle
         else:
-            quantized_t = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind)
-            return quantized_t
+            quantized_t, grid = self.colorizer(feats_r, feats_t, quantized_r, ref_index, current_ind)
+            return quantized_t, grid
 
 
     def dropout2d_lab(self, arr): # drop same layers for all images
